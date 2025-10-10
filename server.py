@@ -357,13 +357,39 @@ class ThreadPoolServer:
         else:
             raise PermissionError('Unsupported media type')
 
-    def handle_post(self, client_sock, path, headers, keep_alive):
-        if path != '/upload':
-            raise FileNotFoundError()
-        content_type = headers.get('content-type')
-        if content_type is None:
-            raise ValueError('Missing Content-Type')
-        if 'application/json' not in content_type:
+    def handle_post(self, client_sock, path, headers, conn_file, keep_alive):
+        try:
+            content_type = headers.get('content-type', '')
+            content_length = int(headers.get('content-length', 0))
+
+            body = conn_file.read(content_length)
+
+            if path == '/upload' and 'application/json' in content_type:
+                data = json.loads(body)
+                fname = f"upload_{random_id()}.json"
+                fpath = os.path.join(UPLOADS_DIR, fname)
+                with open(fpath, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+
+                log(f"JSON uploaded and saved to {fpath}")
+
+                response_obj = {"message": "File uploaded successfully!", "filepath": f"resources/uploads/{fname}"}
+                response_body = json.dumps(response_obj)
+                response = make_response(
+                    200,
+                    'OK',
+                    headers={
+                        'Date': http_date(),
+                        'Server': SERVER_NAME,
+                        'Content-Type': 'application/json',
+                        'Content-Length': str(len(response_body)),
+                        'Connection': 'keep-alive' if keep_alive else 'close',
+                    },
+                    body=response_body
+                )
+                client_sock.sendall(response)
+                return
+
             resp = make_response(415, 'Unsupported Media Type', headers={
                 'Date': http_date(),
                 'Server': SERVER_NAME,
@@ -371,71 +397,25 @@ class ThreadPoolServer:
                 'Connection': 'close'
             })
             client_sock.sendall(resp)
-            return
 
-        cl = headers.get('content-length')
-        if cl is None:
-            raise ValueError('Missing Content-Length')
-        try:
-            length = int(cl)
-        except Exception:
-            raise ValueError('Invalid Content-Length')
-
-        if length > 10 * 1024 * 1024:
-            resp = make_response(413, 'Payload Too Large', headers={
-                'Date': http_date(),
-                'Server': SERVER_NAME,
-                'Content-Length': '0',
-                'Connection': 'close'
-            })
-            client_sock.sendall(resp)
-            return
-
-        body_bytes = b''
-        remaining = length
-        while remaining > 0:
-            chunk = client_sock.recv(min(8192, remaining))
-            if not chunk:
-                break
-            body_bytes += chunk
-            remaining -= len(chunk)
-
-        try:
-            body_text = body_bytes.decode('utf-8')
-            data = json.loads(body_text)
         except Exception as e:
-            log(f'JSON parse error: {e}')
-            resp = make_response(400, 'Bad Request', headers={
-                'Date': http_date(),
-                'Server': SERVER_NAME,
-                'Content-Length': '0',
-                'Connection': 'close'
-            })
-            client_sock.sendall(resp)
-            return
-
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        fname = f'upload_{ts}_{random_id(6)}.json'
-        relpath = os.path.join('uploads', fname)
-        fullpath = os.path.join(UPLOADS_DIR, fname)
-        with open(fullpath, 'w', encoding='utf-8') as wf:
-            json.dump(data, wf, indent=2)
-
-        resp_body = json.dumps({
-            'status': 'success',
-            'message': 'File created successfully',
-            'filepath': '/' + relpath
-        }).encode('utf-8')
-        headers_out = {
-            'Date': http_date(),
-            'Server': SERVER_NAME,
-            'Content-Type': 'application/json',
-            'Content-Length': str(len(resp_body)),
-            'Connection': 'keep-alive' if keep_alive else 'close'
-        }
-        resp = make_response(201, 'Created', headers=headers_out, body=resp_body)
-        client_sock.sendall(resp)
-        log(f'Created upload file: {relpath} ({len(resp_body)} bytes)')
+            log(f'Server error in POST: {e}')
+            error_msg = f"Server error: {e}"
+            response = make_response(
+                500,
+                'Internal Server Error',
+                headers={
+                    'Date': http_date(),
+                    'Server': SERVER_NAME,
+                    'Content-Length': str(len(error_msg)),
+                    'Content-Type': 'text/plain',
+                    'Connection': 'close'
+                },
+                body=error_msg
+            )
+            client_sock.sendall(response)
+            if not keep_alive:
+                client_sock.close()
 
 # ---------------------- Main ----------------------
 def main():

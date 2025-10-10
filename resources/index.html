@@ -20,6 +20,66 @@
           <a href="/sample.txt">📥 Sample Text 1</a> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
           <a href="/sample-2.txt">📥 Sample Text 2</a>
         </ul>
+
+        <div class="upload-section">
+          <h2>Upload JSON Data</h2>
+          <form id="uploadForm">
+            <div class="form-group">
+              <label for="jsonName">Name:</label>
+              <input type="text" id="jsonName" placeholder="Enter name" required>
+            </div>
+            <div class="form-group">
+              <label for="jsonMessage">Message:</label>
+              <textarea id="jsonMessage" placeholder="Enter your message" rows="4" required></textarea>
+            </div>
+            <button type="submit" class="upload-btn">Upload JSON</button>
+          </form>
+          <div id="uploadStatus" class="status-message"></div>
+        </div>
+      </div>
+    
     </div>
+
+    <script>
+      document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const name = document.getElementById('jsonName').value;
+        const message = document.getElementById('jsonMessage').value;
+        const statusDiv = document.getElementById('uploadStatus');
+        
+        const jsonData = {
+          name: name,
+          message: message,
+          timestamp: new Date().toISOString()
+        };
+        
+        statusDiv.textContent = 'Uploading...';
+        statusDiv.className = 'status-message uploading';
+        
+        try {
+          const response = await fetch('/upload', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(jsonData)
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            statusDiv.textContent = `✓ ${result.message} - Path: ${result.filepath}`;
+            statusDiv.className = 'status-message success';
+            document.getElementById('uploadForm').reset();
+          } else {
+            statusDiv.textContent = `✗ Upload failed: ${response.status} ${response.statusText}`;
+            statusDiv.className = 'status-message error';
+          }
+        } catch (error) {
+          statusDiv.textContent = `✗ Upload error: ${error.message}`;
+          statusDiv.className = 'status-message error';
+        }
+      });
+    </script>
   </body>
 </html>
